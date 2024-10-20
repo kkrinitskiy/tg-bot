@@ -1,0 +1,65 @@
+pipeline {
+    agent { label 'ubuntu' }
+
+    stages {
+        
+        stage('Delete workspace before build starts'){
+            steps{
+                deleteDir()
+            }
+        }
+        
+        stage('pull sources from github') {
+           steps{
+                git branch: 'main',
+                    url: 'https://github.com/kkrinitskiy/tg-bot.git'
+           }
+        }
+        
+        stage('build app'){
+            steps{
+                sh 'mvn clean package'
+            }
+        }
+        
+        stage('remove app container and app image'){
+            steps{
+                script {
+                    // Проверка существования контейнера
+                    def containerExists = sh(script: 'docker ps -a -q -f name=tg-bot', returnStdout: true).trim()
+                    if (containerExists) {
+                        sh 'docker kill tg-bot || true'
+                        sh 'docker rm tg-bot || true'
+                    } else {
+                        echo 'Контейнер tg-bot не найден. Пропускаем удаление контейнера.'
+                    }
+
+                    // Проверка существования образа
+                    def imageExists = sh(script: 'docker images -q kkrinitskiy/jenkins-images', returnStdout: true).trim()
+                    if (imageExists) {
+                        sh 'docker image rm kkrinitskiy/jenkins-images || true'
+                    } else {
+                        echo 'Образ kkrinitskiy/jenkins-images не найден. Пропускаем удаление образа.'
+                    }
+                }
+            }
+        }
+        
+        stage('build app image and run app container'){
+            steps{
+                sh 'docker build -t kkrinitskiy/jenkins-images:latest .'
+                sh 'docker run -d --name tg-bot kkrinitskiy/jenkins-images'
+            }
+        }
+        
+        stage('pull image to dockerhub'){
+            steps{
+                withDockerRegistry(credentialsId: 'dockerhub-cred-kkrinitskiy', url: 'https://index.docker.io/v1/'){
+                    sh '''
+                    docker push kkrinitskiy/jenkins-images
+                    '''
+                }
+            }
+        }
+    }
+}
